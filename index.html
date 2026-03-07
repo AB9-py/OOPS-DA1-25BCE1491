@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>Attendance Manager</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0d1117;color:#c9d1d9;font-family:'JetBrains Mono',monospace;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+  #titlebar{background:#161b22;border-bottom:1px solid #30363d;padding:8px 16px;display:flex;align-items:center;gap:10px}
+  #titlebar span{color:#58a6ff;font-weight:700;font-size:14px;letter-spacing:1px}
+  #titlebar small{color:#8b949e;font-size:11px}
+  #terminal{flex:1;overflow-y:auto;padding:16px;font-size:14px;line-height:1.7;background:#0d1117}
+  .out{color:#c9d1d9;white-space:pre-wrap}
+  .inp{color:#79c0ff;white-space:pre-wrap}
+  .err{color:#f85149;white-space:pre-wrap}
+  .ok {color:#3fb950;white-space:pre-wrap}
+  .hdr{color:#d29922;font-weight:700;white-space:pre-wrap}
+  #inputrow{display:flex;align-items:center;padding:8px 16px;background:#161b22;border-top:1px solid #30363d;gap:8px}
+  #prompt{color:#3fb950;font-size:14px;white-space:nowrap}
+  #userinput{flex:1;background:transparent;border:none;outline:none;color:#79c0ff;font-family:'JetBrains Mono',monospace;font-size:14px;caret-color:#58a6ff}
+  #sendbtn{background:#238636;color:#fff;border:none;padding:5px 16px;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:13px;cursor:pointer}
+  #sendbtn:hover{background:#2ea043}
+  #statusbar{background:#161b22;border-top:1px solid #30363d;padding:3px 16px;font-size:11px;color:#8b949e}
+</style>
+</head>
+<body>
+<div id="titlebar">
+  <span>ATTENDANCE MANAGER</span>
+  <small>C Mini Project — Web Build</small>
+</div>
+<div id="terminal"></div>
+<div id="statusbar">Ready</div>
+<div id="inputrow">
+  <span id="prompt">&gt;&nbsp;</span>
+  <input id="userinput" type="text" autocomplete="off" spellcheck="false" placeholder="type your input and press Enter"/>
+  <button id="sendbtn">Send</button>
+</div>
+<script>
+const terminal=document.getElementById('terminal');
+const statusEl=document.getElementById('statusbar');
+const inputEl=document.getElementById('userinput');
+const sendBtn=document.getElementById('sendbtn');
+
+let studentsDB=JSON.parse(localStorage.getItem('att_students')||'[]');
+let attendanceDB=JSON.parse(localStorage.getItem('att_attendance')||'[]');
+function saveStudents(){localStorage.setItem('att_students',JSON.stringify(studentsDB));}
+function saveAttendance(){localStorage.setItem('att_attendance',JSON.stringify(attendanceDB));}
+
+function print(text,cls='out'){const d=document.createElement('div');d.className=cls;d.textContent=text;terminal.appendChild(d);terminal.scrollTop=terminal.scrollHeight;}
+
+let inputResolve=null;
+function getInput(promptText){
+  if(promptText)print(promptText,'out');
+  statusEl.textContent='Waiting for input...';
+  return new Promise(resolve=>{inputResolve=resolve;});
+}
+function submitInput(){
+  const val=inputEl.value;inputEl.value='';
+  print('> '+val,'inp');
+  if(inputResolve){const r=inputResolve;inputResolve=null;r(val);}
+}
+inputEl.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();submitInput();}});
+sendBtn.addEventListener('click',submitInput);
+
+function validateDate(d){const m=d.match(/^(\d{2})-(\d{2})-(\d{4})$/);if(!m)return false;const[,dd,mm,yyyy]=[...m].slice(1).map(Number);return dd>=1&&dd<=31&&mm>=1&&mm<=12&&yyyy>=2000&&yyyy<=2100;}
+function validateName(n){return /^[A-Za-z ]+$/.test(n)&&n.trim().length>0;}
+function normName(n){return n.toUpperCase();}
+function findStudent(regno){return studentsDB.find(s=>s.regno===regno)||null;}
+function calcPerc(regno){
+  const dates=[...new Set(attendanceDB.map(r=>r.date))];
+  if(!dates.length)return 0;
+  const present=attendanceDB.filter(r=>r.regno===regno&&r.status==='P').length;
+  return(present*100.0)/dates.length;
+}
+function calcAll(){return studentsDB.map(s=>({regno:s.regno,name:s.name,percentage:calcPerc(s.regno)}));}
+
+async function addStudent(){
+  if(studentsDB.length>=60){print('Maximum student limit reached.','err');return;}
+  let regno;
+  while(true){const v=await getInput('Enter register number: ');const n=parseInt(v);if(isNaN(n)||n<=0){print('Register number must be positive.','err');continue;}if(findStudent(n)){print('Student already exists.','err');return;}regno=n;break;}
+  let name;
+  while(true){const v=await getInput('Enter name: ');if(!validateName(v)){print('Invalid name. Use alphabets only.','err');continue;}name=normName(v);break;}
+  studentsDB.push({regno,name});saveStudents();
+  print('Student added successfully.','ok');
+}
+
+function displayStudents(){
+  if(!studentsDB.length){print('No students available.','err');return;}
+  print('\nStudent List:','hdr');
+  studentsDB.forEach(s=>print(`RegdNo: ${s.regno}  Name: ${s.name}`));
+}
+
+async function modifyStudent(){
+  const v=await getInput('Enter register number to modify: ');
+  const regno=parseInt(v);const s=findStudent(regno);
+  if(!s){print('Student not found.','err');return;}
+  print('Current name: '+s.name);
+  let name;
+  while(true){const v2=await getInput('Enter new name: ');if(!validateName(v2)){print('Invalid name.','err');continue;}name=normName(v2);break;}
+  s.name=name;saveStudents();print('Student updated successfully.','ok');
+}
+
+async function deleteStudent(){
+  const v=await getInput('Enter register number to delete: ');
+  const regno=parseInt(v);const idx=studentsDB.findIndex(s=>s.regno===regno);
+  if(idx===-1){print('Student not found.','err');return;}
+  studentsDB.splice(idx,1);saveStudents();
+  attendanceDB=attendanceDB.filter(r=>r.regno!==regno);saveAttendance();
+  print('Student deleted successfully.','ok');
+  print('Associated attendance records deleted.','ok');
+}
+
+async function markAttendance(){
+  if(!studentsDB.length){print('No students available.','err');return;}
+  let date;
+  while(true){const v=await getInput('Enter Date (dd-mm-yyyy): ');if(!validateDate(v)){print('Invalid date format.','err');continue;}date=v;break;}
+  const exists=attendanceDB.some(r=>r.date===date);
+  if(exists){print(`Warning: Attendance for ${date} already exists. Overwriting.`,'err');attendanceDB=attendanceDB.filter(r=>r.date!==date);}
+  for(const s of studentsDB){
+    const perc=calcPerc(s.regno);
+    print(`\nRegdNo: ${s.regno} | Name: ${s.name} | Current %: ${perc.toFixed(2)}`);
+    let status;
+    while(true){const v=await getInput('Enter Status (P/A): ');const u=v.toUpperCase();if(u==='P'||u==='A'){status=u;break;}print('Enter P or A only.','err');}
+    attendanceDB.push({date,regno:s.regno,status});
+  }
+  saveAttendance();print('Attendance recorded successfully.','ok');
+}
+
+async function modifyAttendance(){
+  let date;
+  while(true){const v=await getInput('Enter date (dd-mm-yyyy): ');if(!validateDate(v)){print('Invalid date format.','err');continue;}date=v;break;}
+  const v2=await getInput('Enter register number: ');const regno=parseInt(v2);
+  const rec=attendanceDB.find(r=>r.date===date&&r.regno===regno);
+  if(!rec){print('Record not found.','err');return;}
+  print('Current Status: '+rec.status);
+  let ns;
+  while(true){const v3=await getInput('Enter new status (P/A): ');const u=v3.toUpperCase();if(u==='P'||u==='A'){ns=u;break;}print('Enter P or A only.','err');}
+  rec.status=ns;saveAttendance();print('Attendance updated successfully.','ok');
+}
+
+function showAllPercentages(){
+  const all=calcAll();
+  print('\nAttendance Percentages:','hdr');
+  all.forEach(s=>print(`RegdNo: ${s.regno} | Name: ${s.name} | Attendance: ${s.percentage.toFixed(2)}%`));
+}
+
+function sortByPercentage(){
+  const all=calcAll().sort((a,b)=>b.percentage-a.percentage);
+  print('\nStudents sorted by attendance percentage:','hdr');
+  all.forEach(s=>print(`RegdNo: ${s.regno} | Name: ${s.name} | Attendance: ${s.percentage.toFixed(2)}%`));
+}
+
+function listByCategory(){
+  const all=calcAll();
+  print('\n===== Shortage Students (<75%) =====','hdr');
+  all.filter(s=>s.percentage<75).forEach(s=>print(`RegdNo: ${s.regno} | Name: ${s.name} | ${s.percentage.toFixed(2)}%  *** SHORTAGE ***`,'err'));
+  print('\n===== At Risk Students (75-80%) =====','hdr');
+  all.filter(s=>s.percentage>=75&&s.percentage<=80).forEach(s=>print(`RegdNo: ${s.regno} | Name: ${s.name} | ${s.percentage.toFixed(2)}%  WARNING`,'err'));
+  print('\n===== Safe Students (>80%) =====','hdr');
+  all.filter(s=>s.percentage>80).forEach(s=>print(`RegdNo: ${s.regno} | Name: ${s.name} | ${s.percentage.toFixed(2)}%`,'ok'));
+}
+
+function showDayWise(){
+  const dates=[...new Set(attendanceDB.map(r=>r.date))];
+  if(!dates.length){print('No attendance data available.','err');return;}
+  print('\n===== Day-Wise Attendance =====','hdr');
+  dates.forEach(date=>{
+    const present=attendanceDB.filter(r=>r.date===date&&r.status==='P').length;
+    const absent=attendanceDB.filter(r=>r.date===date&&r.status==='A').length;
+    print(`${date} - Present: ${present} | Absent: ${absent}`);
+  });
+}
+
+async function viewHistory(){
+  const v=await getInput('Enter register number: ');
+  const regno=parseInt(v);const s=findStudent(regno);
+  if(!s){print('Student not found.','err');return;}
+  const recs=attendanceDB.filter(r=>r.regno===regno);
+  if(!recs.length){print('No attendance data available.','err');return;}
+  print(`\nAttendance History for ${s.name}\n`,'hdr');
+  recs.forEach(r=>print(`${r.date} - ${r.status}`));
+  print(`\nAttendance Percentage: ${calcPerc(regno).toFixed(2)}%`,'ok');
+}
+
+function generateReport(){
+  const dates=[...new Set(attendanceDB.map(r=>r.date))];
+  const all=calcAll();
+  const sorted=[...all].sort((a,b)=>b.percentage-a.percentage);
+  const avg=all.length?all.reduce((s,x)=>s+x.percentage,0)/all.length:0;
+  const shortage=all.filter(s=>s.percentage<75).length;
+  const risk=all.filter(s=>s.percentage>=75&&s.percentage<=80).length;
+  const safe=all.filter(s=>s.percentage>80).length;
+  print('\n===== Attendance Analysis Report =====','hdr');
+  print(`Total Students: ${studentsDB.length}`);
+  print(`Total Working Days: ${dates.length}`);
+  print(`Class Average Attendance: ${avg.toFixed(2)}%`);
+  print('\nCategory Breakdown:','hdr');
+  print(`Shortage (<75%): ${shortage}`,'err');
+  print(`At Risk (75-80%): ${risk}`);
+  print(`Safe (>80%): ${safe}`,'ok');
+  print('\nDaily Attendance:','hdr');
+  let maxAbsent=-1,maxDate='';
+  dates.forEach(date=>{
+    const present=attendanceDB.filter(r=>r.date===date&&r.status==='P').length;
+    const absent=attendanceDB.filter(r=>r.date===date&&r.status==='A').length;
+    const perc=studentsDB.length?(present*100.0/studentsDB.length):0;
+    print(`${date} - Present: ${present} | Absent: ${absent} | Attendance: ${perc.toFixed(2)}%`);
+    if(absent>maxAbsent){maxAbsent=absent;maxDate=date;}
+  });
+  print('\nTop Performers:','hdr');
+  sorted.slice(0,3).forEach((s,i)=>print(`${i+1}. ${s.name} (RegdNo: ${s.regno}) - ${s.percentage.toFixed(2)}%`,'ok'));
+  if(maxDate)print(`\nMost absent day: ${maxDate} (${maxAbsent} absentees)`,'err');
+}
+
+async function mainLoop(){
+  statusEl.textContent='Running';
+  inputEl.disabled=false;sendBtn.disabled=false;inputEl.focus();
+  while(true){
+    print('');
+    print('===== Attendance Manager =====','hdr');
+    print(' 1. Add Student');
+    print(' 2. Display Students');
+    print(' 3. Mark Attendance');
+    print(' 4. Show Attendance Percentage');
+    print(' 5. Sort Students by Attendance');
+    print(' 6. List Shortage / At Risk / Safe');
+    print(' 7. Generate Analysis Report');
+    print(' 8. Show Day-wise Attendance');
+    print(' 9. View Student Attendance History');
+    print('10. Modify Student');
+    print('11. Modify Attendance');
+    print('12. Delete Student');
+    print('13. Exit');
+    const v=await getInput('Enter Choice: ');
+    const choice=parseInt(v);
+    switch(choice){
+      case 1:await addStudent();break;
+      case 2:displayStudents();break;
+      case 3:await markAttendance();break;
+      case 4:showAllPercentages();break;
+      case 5:sortByPercentage();break;
+      case 6:listByCategory();break;
+      case 7:generateReport();break;
+      case 8:showDayWise();break;
+      case 9:await viewHistory();break;
+      case 10:await modifyStudent();break;
+      case 11:await modifyAttendance();break;
+      case 12:await deleteStudent();break;
+      case 13:{
+        const c=await getInput('Are you sure you want to exit? (y/n): ');
+        if(c.toLowerCase()==='y'){print('Exiting Program...','ok');statusEl.textContent='Exited';inputEl.disabled=true;sendBtn.disabled=true;return;}
+        break;
+      }
+      default:print('Invalid Choice.','err');
+    }
+  }
+}
+mainLoop();
+</script>
+</body>
+</html>
